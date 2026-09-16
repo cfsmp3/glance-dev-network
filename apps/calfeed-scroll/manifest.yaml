@@ -11,8 +11,9 @@ entry: app.star
 width: 192
 height: 32
 
-# Feeds are cached 60 s upstream; matches the main fetch's ttl.
-refresh: 60
+# The feed is cached 60 s upstream, but publishing rules require 300 for
+# apps with free-text or color inputs. The main fetch's ttl stays 60.
+refresh: 300
 
 pages: [now, next]
 
