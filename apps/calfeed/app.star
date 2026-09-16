@@ -13,7 +13,9 @@
 # never converts a timezone.
 #
 # Fetch: one http.get per render, ttl 60 (the feed is cached 60 s
-# upstream; refresh in the manifest matches).
+# upstream). The manifest's refresh is 300, not 60: Glance requires
+# refresh >= 300 for apps with free-text or colour inputs, and this one
+# has both. See https://glance-led.dev/docs/build-with-ai/prompt/.
 
 SOON_SECONDS = 15 * 60
 
