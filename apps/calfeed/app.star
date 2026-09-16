@@ -48,13 +48,13 @@ CALENDAR_ART = """
 
 # Demo data, shown (labelled) until a feed URL is configured: the three
 # steps to set the app up, as events. Two pages cannot show three, so
-# the demo alternates by the minute (refresh is 60): steps 1+2, then
+# the demo alternates per refresh period (refresh is 300): steps 1+2, then
 # 2+3, the first of the pair always running.
 DEMO_STEPS = ["GO: CALFEED.IO", "CREATE VIEW", "ADD TO GLANCE"]
 
 def demo_feed(now):
     h = 3600
-    first = (now // 60) % 2
+    first = (now // 300) % 2
     steps = DEMO_STEPS[first:]
     return {
         "view": {"name": "DEMO", "today": "", "timezone": "UTC"},
