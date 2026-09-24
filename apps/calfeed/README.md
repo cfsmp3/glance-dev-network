@@ -10,7 +10,7 @@ anywhere; the URL is the whole configuration.
 - **Label** — shown on every page. Blank uses the view's name. Two
   instances of the app, one per person's view, each labelled with a
   name, keep two calendars apart on one panel.
-- **Label color** — the label's colour; give each instance its own.
+- **Label color** — the label's colour, picked from the named palette; give each instance its own.
 - **Feed URL** — in the calfeed console, open the view you want on the
   panel (a "next 24 hours, max 3 events" view works well), click
   *Create feed URL*, copy it. It is a secret: anyone holding it sees

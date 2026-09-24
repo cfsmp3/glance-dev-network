@@ -1,12 +1,13 @@
 # Calfeed Agenda
 #
-# DESIGN. One event per page, the time as the hero. Page NOW shows the
-# event that matters right now: the one in progress that started last,
-# else the next one to start; all-day events only when nothing timed is
-# left today. Page NEXT shows what follows it. A calendar glyph on the
-# left is the app's identity; the hero time wears the event's phase
-# colour (white far off, amber within 15 minutes, green running), and a
-# running event paints its elapsed share along the bottom edge.
+# DESIGN. One event per page. Page NOW shows the event that matters
+# right now: the one in progress that started last, else the next one
+# to start; all-day events only when nothing timed is left today. Page
+# NEXT shows what follows it. The event's phase colour (white far off,
+# amber within 15 minutes, green running, sky blue all-day) dresses the
+# left rail, the countdown word, the start time and the calendar glyph
+# beside it; the title sits under it in white. A running event paints
+# its elapsed share along the bottom row.
 #
 # The feed does the date maths: every event carries start_unix/end_unix
 # and `local` {date, weekday, time} in the view's own zone, so this file
@@ -14,8 +15,8 @@
 #
 # Fetch: one http.get per render, ttl 60 (the feed is cached 60 s
 # upstream). The manifest's refresh is 300, not 60: Glance requires
-# refresh >= 300 for apps with free-text or colour inputs, and this one
-# has both. See https://glance-led.dev/docs/build-with-ai/prompt/.
+# refresh >= 300 for apps with free-text inputs, and this one
+# has one. See https://glance-led.dev/docs/build-with-ai/prompt/.
 
 SOON_SECONDS = 15 * 60
 
@@ -23,17 +24,18 @@ COLOR_FAR = "white"
 COLOR_SOON = "amber"
 COLOR_RUNNING = "green"
 COLOR_ALLDAY = "skyblue"
-COLOR_LABEL_DEFAULT = "#9AA3B2"
+COLOR_LABEL_DEFAULT = "gray"
 COLOR_TRACK = "#20262E"
-COLOR_CARD_BG = "#0B0C12"
-COLOR_CARD_TITLE = "#E8B04A"
-COLOR_CARD_SUB = "#6A7090"
 
-HERO_FONTS_WIDE = ["16x20", "10x16"]
-HERO_FONTS_NARROW = ["10x16", "6x8"]
-TITLE_FONTS_WIDE = ["6x8", "5x7", "4x5"]
-NODATA_FONTS = ["10x16", "6x8", "5x7", "4x5"]
-FONTH = {"16x20": 20, "10x16": 16, "6x8": 8, "5x7": 7, "4x5": 5}
+# 64x32 grid: rail x 0-1, content x 4..61. Eyebrow y 1-5, hairline y 7,
+# hero y 9-20, title y 23-29, progress bar y 31.
+RAIL_W = 2
+TEXT_X = 4
+PAD = 2
+HERO_FONTS = ["9x12", "6x8"]
+TITLE_FONTS = ["5x7", "4x5"]
+SUB_FONTS = ["4x5"]
+FONTH = {"9x12": 12, "6x8": 8, "5x7": 7, "4x5": 5}
 
 # 9x9 calendar: two rings, a header band, a grid of days.
 CALENDAR_ART = """
@@ -48,11 +50,21 @@ CALENDAR_ART = """
 #########
 """
 
+# 3x5 chevron after the label: this is the NEXT page.
+CHEVRON_ART = """
+#..
+.#.
+..#
+.#.
+#..
+"""
+CHEVRON_W = 5  # 2 px gap + 3 px glyph
+
 # Demo data, shown (labelled) until a feed URL is configured: the three
 # steps to set the app up, as events. Two pages cannot show three, so
 # the demo alternates per refresh period (refresh is 300): steps 1+2, then
 # 2+3, the first of the pair always running.
-DEMO_STEPS = ["GO: CALFEED.IO", "CREATE VIEW", "ADD TO GLANCE"]
+DEMO_STEPS = ["CALFEED.IO", "CREATE VIEW", "PASTE URL"]
 
 def demo_feed(now):
     h = 3600
@@ -141,29 +153,31 @@ def pick_next(events, chosen, now):
             return e
     return None
 
-# [label, color] for the event's phase; the words and the colour can never
-# disagree. `wide` picks verbose copy; 64 px holds about 7 characters
-# next to the page tag ("10 MIN LEFT" is 55 px in 4x5, the row has 36).
-def phase(e, now, wide):
+# [words, color] for the event's phase, words long form first; the words
+# and the colour can never disagree.
+def phase(e, now):
     if e.get("all_day"):
-        return ["ALL DAY", COLOR_ALLDAY]
+        return [["ALL DAY"], COLOR_ALLDAY]
     if is_running(e, now):
         left = (e["end_unix"] - now) // 60
         if left <= 0:
-            return ["ENDING", COLOR_RUNNING]
-        return [("%d MIN LEFT" if wide else "%dM") % left, COLOR_RUNNING]
+            return [["ENDING"], COLOR_RUNNING]
+        return [[left_label(left) + " LEFT", left_label(left)], COLOR_RUNNING]
     until = e["start_unix"] - now
     if until <= SOON_SECONDS:
-        return [("IN %d MIN" if wide else "IN %dM") % max(until // 60, 1), COLOR_SOON]
-    return [when_label(e, until, wide), COLOR_FAR]
+        return [["IN %dM" % max(until // 60, 1)], COLOR_SOON]
+    return [[when_label(e, until)], COLOR_FAR]
 
-def when_label(e, until, wide):
+def left_label(mins):
+    return "%dM" % mins if mins < 60 else "%dH" % (mins // 60)
+
+def when_label(e, until):
     weekday = str(e.get("local", {}).get("weekday", "")).upper()
     if until >= 24 * 3600 and weekday != "":
-        return weekday
+        return weekday[:3]
     if until >= 3600:
         return "IN %dH" % (until // 3600)
-    return ("IN %d MIN" if wide else "IN %dM") % (until // 60)
+    return "IN %dM" % (until // 60)
 
 def title_of(e):
     t = str(e.get("title", "") or "BUSY").upper()
@@ -172,6 +186,7 @@ def title_of(e):
 # ---- drawing helpers ----------------------------------------------------
 
 # Largest font that fits, then a hard clip; nothing in the API clips.
+# A clipped string ends in ".." so the cut reads as deliberate.
 def fit_clip(c, text, fonts, maxw):
     pick = fonts[len(fonts) - 1]
     for f in fonts:
@@ -181,123 +196,117 @@ def fit_clip(c, text, fonts, maxw):
     t = text
     if c.text_width(t, pick) > maxw:
         for k in range(len(t), 0, -1):
-            if c.text_width(t[:k], pick) <= maxw:
-                t = t[:k]
+            cut = t[:k].rstrip() + ".."
+            if c.text_width(cut, pick) <= maxw:
+                t = cut
                 break
     return [pick, t]
 
-def nodata(c, title, sub):
-    c.fill(COLOR_CARD_BG)
-    wide = c.width >= 128
-    ft, tt = fit_clip(c, title, NODATA_FONTS, c.width - 8)
-    ty = 4 if wide else 5
-    c.text(tt, c.width // 2, ty, font = ft, color = COLOR_CARD_TITLE, align = "center")
-    fs, ts = fit_clip(c, sub, ["5x7", "4x5"], c.width - 8)
-    c.text(ts, c.width // 2, 22 if wide else 18, font = fs, color = COLOR_CARD_SUB, align = "center")
-
-# Two short lines: what, and what to do. Narrow copy fits 64 px in 4x5.
-def offline(c):
-    if c.width >= 128:
-        nodata(c, "CALFEED OFFLINE", "CHECK FEED URL")
-    else:
-        nodata(c, "OFFLINE", "CHECK URL")
-
-def all_clear(c, sub):
+# The shared frame of every screen: a 2 px rail on the left edge in the
+# screen's state colour, and the eyebrow row (y 1..5): label left in the
+# label colour, a state word right-aligned, measured first.
+# `words` is the state word, long form first: the long one is used only
+# when the label still fits whole beside it. On NEXT pages a chevron
+# after the label marks the page.
+def chrome(c, ctx, label, words, col, page):
     c.fill("black")
-    c.rect(0, 0, 1, c.height - 1, fill = COLOR_RUNNING)
-    c.text("ALL CLEAR", c.width // 2, 5, font = "6x8" if c.width >= 128 else "5x7", color = COLOR_RUNNING, align = "center")
-    c.text(sub, c.width // 2, 18, font = "4x5", color = COLOR_LABEL_DEFAULT, align = "center")
+    c.rect(0, 0, RAIL_W, c.height, fill = col)
+    right = c.width - PAD
+    lw = c.text_width(label, "4x5") + (CHEVRON_W if page == "NEXT" else 0)
+    word = words[len(words) - 1]
+    for w in words:
+        if TEXT_X + lw + 4 + c.text_width(w, "4x5") <= right:
+            word = w
+            break
+    sx = right - c.text_width(word, "4x5")
+    c.text(word, sx, 1, font = "4x5", color = col)
+    room = sx - TEXT_X - 4 - (CHEVRON_W if page == "NEXT" else 0)
+    lf, lt = fit_clip(c, label, ["4x5"], room)
+    c.text(lt, TEXT_X, 1, font = lf, color = label_color(ctx))
+    if page == "NEXT":
+        c.sprite(CHEVRON_ART, TEXT_X + c.text_width(lt, lf) + 2, 1, color = label_color(ctx))
+    c.hline(TEXT_X, right - 1, 7, color = COLOR_TRACK)
+
+# The hero row (y 9..20) with the calendar glyph as the app's identity
+# on its right, then a sub line (y 23..29).
+def hero_and_sub(c, hero, col, sub, sub_col, sub_fonts):
+    right = c.width - PAD
+    c.sprite(CALENDAR_ART, right - 9, 10, color = color.dim(col, 55))
+    hf, ht = fit_clip(c, hero, HERO_FONTS, right - 9 - 2 - TEXT_X)
+    c.text(ht, TEXT_X, 9 + (12 - FONTH[hf]) // 2, font = hf, color = col)
+    sf, st = fit_clip(c, sub, sub_fonts, right - TEXT_X)
+    c.text(st, TEXT_X, 23 + (7 - FONTH[sf]) // 2, font = sf, color = sub_col)
+
+# Two short lines: what, and what to do.
+def offline(c, ctx):
+    chrome(c, ctx, eyebrow_text(ctx, ""), ["OFFLINE"], COLOR_SOON, "NOW")
+    hero_and_sub(c, "--:--", COLOR_SOON, "CHECK FEED", COLOR_LABEL_DEFAULT, SUB_FONTS)
+
+def all_clear(c, ctx, view_name, page, sub):
+    chrome(c, ctx, eyebrow_text(ctx, view_name), ["CLEAR"], COLOR_RUNNING, page)
+    hero_and_sub(c, "FREE", COLOR_RUNNING, sub, COLOR_LABEL_DEFAULT, SUB_FONTS)
 
 # The label is the eyebrow's left side: the configured one, else the
-# view's name, else DEMO. NEXT pages append the page name so two
-# instances (yours, your wife's) still say whose event is on screen.
+# view's name, else DEMO, so two instances (yours, your wife's) still
+# say whose event is on screen.
 def label_color(ctx):
     col = str(ctx.inputs.get("labelcolor", "")).strip()
     return col if col != "" else COLOR_LABEL_DEFAULT
 
-def eyebrow_text(ctx, state, view_name, page):
+def eyebrow_text(ctx, view_name):
     label = str(ctx.inputs.get("label", "")).strip().upper()
     if label == "":
         label = str(view_name).upper()  # the demo feed's view is called DEMO
-    return label + (" NEXT" if page == "NEXT" else "")
+    return label if label != "" else "CALENDAR"
 
-# One event card. `eyebrow` is the page name (NOW / NEXT).
-def card(c, e, now, eyebrow, state, view_name, ctx):
-    c.fill("black")
-    wide = c.width >= 128
-    label, col = phase(e, now, wide)
-    left = 10 if wide else 0
-    right = c.width - (10 if wide else 0)
+# An all-day event's hero: TODAY while it runs, else its weekday.
+def allday_hero(e, now):
+    if e["start_unix"] <= now:
+        return "TODAY"
+    weekday = str(e.get("local", {}).get("weekday", "")).upper()
+    return weekday[:3] if weekday != "" else "SOON"
 
-    # Identity: the calendar glyph (rows 0-8), phase-coloured. The hero
-    # starts below it: 16x20 at y 10 on wide, 10x16 at y 9 on narrow.
-    c.sprite(CALENDAR_ART, left, 0, color = col)
-    text_x = left + 11
+# One event card. `page` is the page name (NOW / NEXT).
+def card(c, e, now, page, view_name, ctx):
+    words, col = phase(e, now)
+    chrome(c, ctx, eyebrow_text(ctx, view_name), words, col, page)
 
-    # Eyebrow row (y 1..5), 4x5. Wide: label left, phase right. Narrow
-    # (53 px after the glyph, about 10 characters): NOW pages keep the
-    # phase and clip the label to what is left of it; NEXT pages keep
-    # the " NEXT" suffix instead, since the hero colour already carries
-    # the phase and the page name is what tells the two apart.
-    lw = c.text_width(label, "4x5")
-    lx = right - lw
-    if wide or eyebrow != "NEXT":
-        tf, tag = fit_clip(c, eyebrow_text(ctx, state, view_name, eyebrow), ["4x5"], lx - text_x - 2)
-        c.text(tag, text_x, 1, font = tf, color = label_color(ctx))
-        c.text(label, lx, 1, font = "4x5", color = col)
-    else:
-        suffix = " NEXT"
-        room = right - text_x - c.text_width(suffix, "4x5")
-        tf, tag = fit_clip(c, eyebrow_text(ctx, state, view_name, "NOW"), ["4x5"], room)
-        c.text(tag + suffix, text_x, 1, font = tf, color = label_color(ctx))
+    # Hero: the start time (or TODAY / weekday for all-day), phase-
+    # coloured; the title under it in white, the largest that fits.
+    hero = allday_hero(e, now) if e.get("all_day") else str(e["local"]["time"])
+    hero_and_sub(c, hero, col, title_of(e), "white", TITLE_FONTS)
 
-    # Hero: the time (or ALL DAY), phase-coloured.
-    hero = "ALL DAY" if e.get("all_day") else str(e["local"]["time"])
-    fonts = HERO_FONTS_WIDE if wide else HERO_FONTS_NARROW
-    hf, ht = fit_clip(c, hero, fonts, right - left)
-    hy = 10 if wide else 9
-    c.text(ht, left, hy, font = hf, color = col)
-
-    # Title: to the right of the hero on wide, under it on narrow.
-    title = title_of(e)
-    if wide:
-        tx = left + c.text_width(ht, hf) + 6
-        tf, tt = fit_clip(c, title, TITLE_FONTS_WIDE, right - tx)
-        c.text(tt, tx, hy + (FONTH[hf] - FONTH[tf]) // 2, font = tf, color = "white")
-    else:
-        # 4x5 on rows 26-30 keeps row 31 free for the progress bar and
-        # a 1 px gap under the hero (rows 9-24).
-        tf, tt = fit_clip(c, title, ["4x5"], right - left)
-        c.text(tt, left, 26, font = tf, color = "white")
-
-    # A running event shows its elapsed share along the bottom edge.
+    # A running event shows its elapsed share along the bottom row.
     if is_running(e, now):
         total = e["end_unix"] - e["start_unix"]
         pct = 100 * (now - e["start_unix"]) // total if total > 0 else 0
-        c.progress_bar(left, c.height - 1, right - left, 1, pct, color = col, bg = COLOR_TRACK)
+        right = c.width - PAD
+        c.progress_bar(TEXT_X, c.height - 1, right - TEXT_X, 1, pct, color = col, bg = COLOR_TRACK)
 
 # ---- pages --------------------------------------------------------------
 
 def now(c, ctx):
     feed, state = fetch_feed(ctx)
     if state == "offline":
-        offline(c)
+        offline(c, ctx)
         return
+    view_name = feed.get("view", {}).get("name", "")
     e = pick_now(feed.get("events", []), ctx.now.unix)
     if e == None:
-        all_clear(c, "NO EVENTS")
+        all_clear(c, ctx, view_name, "NOW", "NO EVENTS")
         return
-    card(c, e, ctx.now.unix, "NOW", state, feed.get("view", {}).get("name", ""), ctx)
+    card(c, e, ctx.now.unix, "NOW", view_name, ctx)
 
 def next(c, ctx):
     feed, state = fetch_feed(ctx)
     if state == "offline":
-        offline(c)
+        offline(c, ctx)
         return
+    view_name = feed.get("view", {}).get("name", "")
     events = feed.get("events", [])
     chosen = pick_now(events, ctx.now.unix)
     e = pick_next(events, chosen, ctx.now.unix)
     if e == None:
-        all_clear(c, "NOTHING AFTER" if chosen != None else "NO EVENTS")
+        all_clear(c, ctx, view_name, "NEXT", "NOTHING AFTER" if chosen != None else "NO EVENTS")
         return
-    card(c, e, ctx.now.unix, "NEXT", state, feed.get("view", {}).get("name", ""), ctx)
+    card(c, e, ctx.now.unix, "NEXT", view_name, ctx)

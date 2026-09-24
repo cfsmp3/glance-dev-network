@@ -25,10 +25,12 @@ inputs:
     default: ""
     help: Shown on every page, e.g. a name when two instances show two people's calendars. Blank uses the view's name.
   - key: labelcolor
-    type: string
-    app_input_type: color
+    type: choice
+    app_input_type: dropdown
     label: Label color
-    default: "#9AA3B2"
+    default: gray
+    choices: [gray, white, red, orange, amber, green, skyblue, purple, pink]
+    options: [gray, white, red, orange, amber, green, skyblue, purple, pink]
     help: Colors the label, so two instances read apart at a glance.
   - key: feedurl
     type: string
